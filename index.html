@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#05030c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Resonance">
+<meta name="description" content="An audio-reactive orb that listens through your microphone and pulses with the sound in the room.">
+<title>Resonance</title>
+<style>
+  :root {
+    --ink: #f4efff;
+    --ink-dim: rgba(244, 239, 255, 0.62);
+    --ink-faint: rgba(244, 239, 255, 0.38);
+    --glass: rgba(18, 12, 36, 0.55);
+    --glass-edge: rgba(255, 255, 255, 0.12);
+    --accent: #c9a8ff;
+    --accent-2: #ff9ec7;
+    --bg: #05030c;
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+  }
+  canvas#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+
+  /* ---------- Start / message overlay ---------- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: calc(24px + var(--safe-t)) calc(24px + var(--safe-r)) calc(24px + var(--safe-b)) calc(24px + var(--safe-l));
+    text-align: center;
+    background: radial-gradient(ellipse at 50% 45%, rgba(5,3,12,0.15) 0%, rgba(5,3,12,0.7) 70%, rgba(5,3,12,0.9) 100%);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    transition: opacity .9s ease, visibility .9s;
+  }
+  .overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  .title {
+    font-weight: 200; letter-spacing: 0.32em; text-transform: uppercase;
+    font-size: clamp(28px, 9vw, 52px); margin: 0 0 0 0.32em;
+    background: linear-gradient(100deg, #9fb4ff 0%, #c9a8ff 35%, #ff9ec7 65%, #ffd38a 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .subtitle { margin: 12px 0 44px; color: var(--ink-dim); font-weight: 300; font-size: 16px; letter-spacing: 0.04em; }
+  .begin {
+    position: relative; width: 148px; height: 148px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.28); background: rgba(255,255,255,0.04);
+    color: var(--ink); font: inherit; font-size: 15px; font-weight: 400; letter-spacing: 0.16em; text-transform: uppercase;
+    cursor: pointer; display: grid; place-items: center;
+    box-shadow: 0 0 40px rgba(201,168,255,0.25), inset 0 0 30px rgba(201,168,255,0.12);
+    transition: transform .25s ease, background .25s ease;
+  }
+  .begin:active { transform: scale(0.96); background: rgba(255,255,255,0.09); }
+  .begin::before, .begin::after {
+    content: ""; position: absolute; inset: -1px; border-radius: 50%;
+    border: 1px solid rgba(201,168,255,0.5); animation: ring 3.2s ease-out infinite;
+  }
+  .begin::after { animation-delay: 1.6s; border-color: rgba(255,158,199,0.45); }
+  @keyframes ring { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(1.75); opacity: 0; } }
+  .begin span { line-height: 1.5; }
+  .privacy { margin-top: 48px; max-width: 320px; color: var(--ink-faint); font-size: 13px; line-height: 1.55; }
+  .privacy svg { vertical-align: -2px; margin-right: 4px; }
+
+  .msg { max-width: 380px; }
+  .msg h2 { font-weight: 300; font-size: 24px; margin: 0 0 12px; letter-spacing: 0.02em; }
+  .msg p { color: var(--ink-dim); font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+  .msg .steps {
+    text-align: left; background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 16px;
+    padding: 14px 18px; margin: 18px 0 22px; font-size: 14px; line-height: 1.6; color: var(--ink-dim);
+  }
+  .msg .steps b { color: var(--ink); font-weight: 500; }
+  .msg .steps div + div { margin-top: 10px; }
+  .pill {
+    font: inherit; font-size: 15px; color: var(--ink); cursor: pointer;
+    padding: 12px 26px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.07);
+  }
+  .pill:active { background: rgba(255,255,255,0.14); }
+
+  /* ---------- HUD buttons ---------- */
+  .hud { position: fixed; z-index: 10; display: flex; gap: 10px; transition: opacity .6s ease; }
+  .hud.top-right { top: calc(14px + var(--safe-t)); right: calc(14px + var(--safe-r)); }
+  .hud.dim { opacity: 0.35; }
+  .hud.gone { opacity: 0; pointer-events: none; }
+  .icon-btn {
+    width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+    color: var(--ink); background: rgba(20,14,40,0.38); border: 1px solid rgba(255,255,255,0.1);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    padding: 0;
+  }
+  .icon-btn:active { transform: scale(0.94); }
+  .icon-btn svg { width: 20px; height: 20px; }
+  .icon-btn[hidden] { display: none; }
+
+  /* ---------- Settings panel ---------- */
+  .panel {
+    position: fixed; z-index: 15;
+    top: calc(66px + var(--safe-t)); right: calc(14px + var(--safe-r));
+    width: min(300px, calc(100vw - 28px - var(--safe-l) - var(--safe-r)));
+    padding: 18px 18px 14px; border-radius: 20px;
+    background: var(--glass); border: 1px solid var(--glass-edge);
+    -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    transform-origin: top right; transition: opacity .25s ease, transform .25s ease, visibility .25s;
+  }
+  .panel.closed { opacity: 0; transform: scale(0.92) translateY(-6px); visibility: hidden; pointer-events: none; }
+  .panel h3 { margin: 0 0 14px; font-size: 12px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint); }
+  .row { margin-bottom: 14px; }
+  .row label { display: flex; justify-content: space-between; font-size: 14px; color: var(--ink-dim); margin-bottom: 8px; }
+  .row label output { color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; margin: 0; touch-action: pan-x;
+  }
+  input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, #7f8cff, #c9a8ff, #ff9ec7, #ffd38a); opacity: .85; }
+  input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, #7f8cff, #c9a8ff, #ff9ec7, #ffd38a); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%;
+    background: #fff; border: none; box-shadow: 0 0 12px rgba(201,168,255,0.8);
+  }
+  input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: none; box-shadow: 0 0 12px rgba(201,168,255,0.8); }
+  .meters { display: flex; gap: 8px; margin: 4px 0 14px; }
+  .meter { flex: 1; }
+  .meter .bar { height: 5px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .meter .fill { height: 100%; width: 0%; border-radius: 4px; background: linear-gradient(90deg, #8fa0ff, #ff9ec7); }
+  .meter span { display: block; font-size: 11px; color: var(--ink-faint); margin-top: 5px; letter-spacing: 0.06em; }
+  .panel .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; }
+  .panel .foot button { font: inherit; font-size: 13px; color: var(--ink); background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+  .panel .tip { font-size: 12px; color: var(--ink-faint); line-height: 1.5; margin: 12px 0 0; }
+
+  /* ---------- Toast & hint ---------- */
+  .toast {
+    position: fixed; z-index: 12; left: 50%; bottom: calc(40px + var(--safe-b));
+    transform: translateX(-50%) translateY(10px); opacity: 0;
+    padding: 10px 20px; border-radius: 999px; font-size: 14px; letter-spacing: 0.08em;
+    background: rgba(20,14,40,0.5); border: 1px solid rgba(255,255,255,0.12);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    transition: opacity .4s ease, transform .4s ease; pointer-events: none; white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .hint {
+    position: fixed; z-index: 11; left: 0; right: 0; bottom: calc(22px + var(--safe-b));
+    text-align: center; font-size: 12px; letter-spacing: 0.14em; color: var(--ink-faint);
+    text-transform: lowercase; transition: opacity 1.5s ease; pointer-events: none; padding: 0 16px;
+  }
+  .hint.hidden { opacity: 0; }
+  .noscript { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="Audio-reactive visual"></canvas>
+
+<!-- Start screen -->
+<div class="overlay" id="start">
+  <h1 class="title">Resonance</h1>
+  <p class="subtitle">An orb that listens to the room.</p>
+  <button class="begin" id="beginBtn" type="button"><span>Tap to<br>begin</span></button>
+  <p class="privacy">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+    Uses your microphone. Sound is analysed live on this device and is never recorded or uploaded.
+  </p>
+</div>
+
+<!-- Message screen (denied, unsupported, interrupted) -->
+<div class="overlay hidden" id="message">
+  <div class="msg" id="messageBody"></div>
+</div>
+
+<!-- HUD -->
+<div class="hud top-right gone" id="hud">
+  <button class="icon-btn" id="fsBtn" type="button" aria-label="Toggle fullscreen" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  </button>
+  <button class="icon-btn" id="gearBtn" type="button" aria-label="Settings" aria-expanded="false" aria-controls="panel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+  </button>
+</div>
+
+<div class="panel closed" id="panel" role="dialog" aria-label="Settings">
+  <h3>Listening</h3>
+  <div class="meters" aria-hidden="true">
+    <div class="meter"><div class="bar"><div class="fill" id="mBass"></div></div><span>bass</span></div>
+    <div class="meter"><div class="bar"><div class="fill" id="mMid"></div></div><span>mids</span></div>
+    <div class="meter"><div class="bar"><div class="fill" id="mHigh"></div></div><span>highs</span></div>
+    <div class="meter"><div class="bar"><div class="fill" id="mVol"></div></div><span>level</span></div>
+  </div>
+  <div class="row">
+    <label for="sens">Sensitivity <output id="sensOut"></output></label>
+    <input type="range" id="sens" min="0.3" max="3" step="0.05">
+  </div>
+  <div class="row">
+    <label for="glow">Glow <output id="glowOut"></output></label>
+    <input type="range" id="glow" min="0" max="2.5" step="0.05">
+  </div>
+  <div class="row">
+    <label for="count">Particles <output id="countOut"></output></label>
+    <input type="range" id="count" min="0" max="10000" step="100">
+  </div>
+  <div class="foot">
+    <button type="button" id="paletteBtn">Palette: <span id="paletteName"></span></button>
+    <button type="button" id="resetBtn">Reset</button>
+  </div>
+  <p class="tip" id="tip">Drag to rotate · pinch to zoom · double-tap to change colours.</p>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="hint hidden" id="hint">drag · pinch · double-tap</div>
+
+<noscript><div class="noscript">Resonance needs JavaScript and WebGL to run.</div></noscript>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/* =====================================================================
+   Device profile & settings
+   ===================================================================== */
+const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+const isSmall = Math.min(screen.width, screen.height) < 820;
+const MOBILE = isTouch || isSmall;
+const MAX_PARTICLES = 10000;
+const MAX_PR = MOBILE ? 1.5 : 2;
+
+const DEFAULTS = { sensitivity: 1, glow: 1, particles: MOBILE ? 3500 : 6000, palette: 0 };
+const STORE_KEY = 'resonance-settings-v1';
+const settings = { ...DEFAULTS };
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+  if (saved && typeof saved === 'object') Object.assign(settings, saved);
+} catch (_) { /* storage unavailable: use defaults */ }
+function saveSettings() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch (_) {}
+}
+
+/* =====================================================================
+   Palettes: calm (quiet) pair -> hot (loud) pair
+   ===================================================================== */
+const PALETTES = [
+  { name: 'Dusk',   calmA: '#2b3bff', calmB: '#8a3dff', hotA: '#ff3d8b', hotB: '#ffb63d', core: '#ffe2a8' },
+  { name: 'Lagoon', calmA: '#0a7cff', calmB: '#14d6c8', hotA: '#ff5ea8', hotB: '#ffe066', core: '#e8fff8' },
+  { name: 'Nebula', calmA: '#4a1fb8', calmB: '#c03dff', hotA: '#ff2f4f', hotB: '#ff9a1f', core: '#ffd9f0' },
+];
+settings.palette = ((settings.palette | 0) % PALETTES.length + PALETTES.length) % PALETTES.length;
+
+const colorState = {
+  calmA: new THREE.Color(), calmB: new THREE.Color(), hotA: new THREE.Color(), hotB: new THREE.Color(), core: new THREE.Color(),
+};
+const colorTarget = {
+  calmA: new THREE.Color(), calmB: new THREE.Color(), hotA: new THREE.Color(), hotB: new THREE.Color(), core: new THREE.Color(),
+};
+function setPaletteTarget(i, instant) {
+  const p = PALETTES[i];
+  for (const k of Object.keys(colorTarget)) {
+    colorTarget[k].set(p[k]);
+    if (instant) colorState[k].copy(colorTarget[k]);
+  }
+}
+setPaletteTarget(settings.palette, true);
+
+/* =====================================================================
+   Renderer, scene, camera
+   ===================================================================== */
+const canvas = document.getElementById('scene');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', alpha: false });
+} catch (e) {
+  showMessage(`<h2>WebGL isn't available</h2><p>This piece needs WebGL to draw the visuals. Try a recent version of Safari or Chrome, and make sure hardware acceleration is on.</p>`);
+  throw e;
+}
+let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PR);
+renderer.setPixelRatio(pixelRatio);
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(0x05030c, 1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 100);
+function idealDistance() {
+  const aspect = innerWidth / innerHeight;
+  return aspect < 1 ? 6.2 / Math.pow(aspect, 0.55) : 6.2;
+}
+camera.position.set(0, 0.4, idealDistance());
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.enablePan = false;
+controls.rotateSpeed = MOBILE ? 0.7 : 0.6;
+controls.zoomSpeed = 0.8;
+controls.minDistance = 2.6;
+controls.maxDistance = 18;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.35;
+
+/* =====================================================================
+   Shared GLSL: simplex noise (Ashima Arts / Stefan Gustavson, MIT)
+   ===================================================================== */
+const NOISE_GLSL = /* glsl */`
+vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 permute(vec4 x){return mod289(((x*34.0)+10.0)*x);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 C=vec2(1.0/6.0,1.0/3.0);
+  const vec4 D=vec4(0.0,0.5,1.0,2.0);
+  vec3 i=floor(v+dot(v,C.yyy));
+  vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g=step(x0.yzx,x0.xyz);
+  vec3 l=1.0-g;
+  vec3 i1=min(g.xyz,l.zxy);
+  vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+C.xxx;
+  vec3 x2=x0-i2+C.yyy;
+  vec3 x3=x0-D.yyy;
+  i=mod289(i);
+  vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+  float n_=0.142857142857;
+  vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.0*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z);
+  vec4 y_=floor(j-7.0*x_);
+  vec4 x=x_*ns.x+ns.yyyy;
+  vec4 y=y_*ns.x+ns.yyyy;
+  vec4 h=1.0-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy);
+  vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.0+1.0;
+  vec4 s1=floor(b1)*2.0+1.0;
+  vec4 sh=-step(h,vec4(0.0));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;
+  vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x);
+  vec3 p1=vec3(a0.zw,h.y);
+  vec3 p2=vec3(a1.xy,h.z);
+  vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+  vec4 m=max(0.5-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);
+  m=m*m;
+  return 105.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}
+`;
+
+/* =====================================================================
+   Centrepiece: the breathing orb
+   ===================================================================== */
+const audioUniforms = {
+  uTime: { value: 0 },
+  uBass: { value: 0 },
+  uMid: { value: 0 },
+  uHigh: { value: 0 },
+  uVol: { value: 0 },
+  uBeat: { value: 0 },
+  uEnergy: { value: 0 },
+  uCalmA: { value: colorState.calmA },
+  uCalmB: { value: colorState.calmB },
+  uHotA: { value: colorState.hotA },
+  uHotB: { value: colorState.hotB },
+  uCore: { value: colorState.core },
+};
+
+let orbGeo = new THREE.IcosahedronGeometry(1, MOBILE ? 40 : 64);
+orbGeo.deleteAttribute('normal');
+orbGeo.deleteAttribute('uv');
+orbGeo = mergeVertices(orbGeo);
+
+const orbMat = new THREE.ShaderMaterial({
+  uniforms: audioUniforms,
+  vertexShader: /* glsl */`
+    uniform float uTime, uBass, uMid, uHigh, uBeat, uVol;
+    varying vec3 vNormalV;
+    varying vec3 vViewPos;
+    varying vec3 vObj;
+    varying float vDisp;
+    ${NOISE_GLSL}
+    float field(vec3 n){
+      float t = uTime;
+      float big    = snoise(n * 1.15 + vec3(t * 0.13, t * 0.09, -t * 0.11));
+      float med    = snoise(n * 2.6  + vec3(-t * 0.21, t * 0.27, t * 0.17));
+      float ripple = snoise(n * 7.5  + vec3(t * 1.3, -t * 1.1, t * 0.9));
+      return big    * (0.10 + uBass * 0.30)
+           + med    * (0.045 + uMid * 0.14)
+           + ripple * (0.008 + uHigh * 0.045);
+    }
+    vec3 displaced(vec3 n, out float d){
+      d = field(n);
+      float breathe = sin(uTime * 0.85) * 0.035 + sin(uTime * 0.37) * 0.02;
+      float r = 1.0 + breathe + uBass * 0.24 + uBeat * 0.13 + uVol * 0.06;
+      return n * (r + d);
+    }
+    void main(){
+      vec3 n = normalize(position);
+      vec3 helper = abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+      vec3 tng = normalize(cross(n, helper));
+      vec3 btg = normalize(cross(n, tng));
+      const float e = 0.012;
+      float d0, d1, d2;
+      vec3 p0 = displaced(n, d0);
+      vec3 p1 = displaced(normalize(n + tng * e), d1);
+      vec3 p2 = displaced(normalize(n + btg * e), d2);
+      vec3 nrm = normalize(cross(p1 - p0, p2 - p0));
+      if (dot(nrm, n) < 0.0) nrm = -nrm;
+      vDisp = d0;
+      vObj = n;
+      vec4 mv = modelViewMatrix * vec4(p0, 1.0);
+      vViewPos = mv.xyz;
+      vNormalV = normalize(normalMatrix * nrm);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform float uTime, uBass, uMid, uHigh, uBeat, uEnergy, uVol;
+    uniform vec3 uCalmA, uCalmB, uHotA, uHotB, uCore;
+    varying vec3 vNormalV;
+    varying vec3 vViewPos;
+    varying vec3 vObj;
+    varying float vDisp;
+    ${NOISE_GLSL}
+    void main(){
+      vec3 N = normalize(vNormalV);
+      vec3 V = normalize(-vViewPos);
+      float ndv = clamp(dot(N, V), 0.0, 1.0);
+      float fres = pow(1.0 - ndv, 2.4);
+
+      // flowing colour bands across the surface
+      float band = snoise(vObj * 1.6 + vec3(0.0, uTime * 0.18, uTime * 0.07)) * 0.5 + 0.5;
+      band = clamp(band + vDisp * 1.6, 0.0, 1.0);
+      vec3 calm = mix(uCalmA, uCalmB, band);
+      vec3 hot  = mix(uHotA, uHotB, band);
+      float heat = smoothstep(0.0, 1.0, uEnergy);
+      vec3 base = mix(calm, hot, heat);
+      vec3 rimCol = mix(mix(uCalmB, uCalmA, band), mix(uHotB, uHotA, band), heat);
+
+      // soft fake subsurface: brighter where the surface bulges out
+      float bulge = smoothstep(-0.1, 0.35, vDisp);
+      vec3 col = base * (0.16 + 0.42 * bulge);
+      col += rimCol * fres * (1.1 + uBass * 0.6 + uBeat * 0.6);
+
+      // highlight from a soft key light
+      vec3 L = normalize(vec3(0.4, 0.7, 0.6));
+      vec3 H = normalize(L + V);
+      float spec = pow(max(dot(N, H), 0.0), 48.0);
+      col += uCore * spec * (0.35 + uVol * 0.6);
+
+      // shimmering glints driven by the highs
+      float glint = snoise(vObj * 22.0 + vec3(uTime * 3.1, -uTime * 2.3, uTime * 2.7));
+      glint = pow(max(glint, 0.0), 6.0);
+      col += mix(uCore, hot, 0.3) * glint * (0.1 + uHigh * 1.6);
+
+      // beat flash from the core
+      col += uCore * uBeat * 0.18 * (0.3 + ndv);
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+const orb = new THREE.Mesh(orbGeo, orbMat);
+scene.add(orb);
+
+/* Soft halo sprite behind the orb */
+function makeGlowTexture() {
+  const s = 256, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.2, 'rgba(255,255,255,0.45)');
+  grd.addColorStop(0.5, 'rgba(255,255,255,0.12)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, s, s);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const haloMat = new THREE.SpriteMaterial({
+  map: makeGlowTexture(), transparent: true, depthWrite: false, depthTest: true,
+  blending: THREE.AdditiveBlending, opacity: 0.5,
+});
+const halo = new THREE.Sprite(haloMat);
+halo.scale.setScalar(5.5);
+halo.renderOrder = -1;
+scene.add(halo);
+
+/* =====================================================================
+   Particle field
+   ===================================================================== */
+const pGeo = new THREE.BufferGeometry();
+{
+  const pos = new Float32Array(MAX_PARTICLES * 3);   // unit direction
+  const radius = new Float32Array(MAX_PARTICLES);
+  const rnd = new Float32Array(MAX_PARTICLES * 3);   // x: burst, y: size, z: phase
+  for (let i = 0; i < MAX_PARTICLES; i++) {
+    const u = Math.random() * 2 - 1;
+    const th = Math.random() * Math.PI * 2;
+    const s = Math.sqrt(1 - u * u);
+    pos[i * 3] = s * Math.cos(th);
+    pos[i * 3 + 1] = u;
+    pos[i * 3 + 2] = s * Math.sin(th);
+    radius[i] = 1.75 + Math.pow(Math.random(), 1.7) * 6.0;
+    rnd[i * 3] = Math.random();
+    rnd[i * 3 + 1] = Math.random();
+    rnd[i * 3 + 2] = Math.random();
+  }
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  pGeo.setAttribute('aRadius', new THREE.BufferAttribute(radius, 1));
+  pGeo.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 3));
+  pGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 20);
+}
+const pUniforms = {
+  ...audioUniforms,
+  uBurst: { value: 0 },
+  uPR: { value: pixelRatio },
+  uSizeScale: { value: 1 },
+};
+const pMat = new THREE.ShaderMaterial({
+  uniforms: pUniforms,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexShader: /* glsl */`
+    uniform float uTime, uBurst, uBass, uHigh, uEnergy, uBeat, uPR, uSizeScale;
+    uniform vec3 uCalmA, uCalmB, uHotA, uHotB, uCore;
+    attribute float aRadius;
+    attribute vec3 aRnd;
+    varying vec3 vCol;
+    varying float vAlpha;
+    mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+    void main(){
+      vec3 dir = position;
+      float ph = aRnd.z * 6.2831853;
+      // slow swirling orbit, inner particles move faster
+      float spin = uTime * (0.03 + 0.09 / aRadius) * (0.6 + aRnd.x) + ph;
+      dir.xz = rot(spin) * dir.xz;
+      // gentle drifting wobble
+      vec3 wob = vec3(sin(uTime * 0.31 + ph * 3.0), cos(uTime * 0.27 + ph * 2.0), sin(uTime * 0.23 + ph)) * 0.18;
+      // burst outward: each particle responds with its own strength and lag
+      float b = pow(clamp(uBurst, 0.0, 2.0), 0.75 + aRnd.y * 0.8);
+      float push = b * (0.7 + aRnd.x * 2.6) * (0.55 + 0.45 * smoothstep(1.8, 5.0, aRadius) + 0.5);
+      float r = aRadius + push + uBass * 0.35;
+      vec3 p = dir * r + wob;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      gl_Position = projectionMatrix * mv;
+
+      float tw = 0.65 + 0.35 * sin(uTime * (2.0 + aRnd.y * 5.0) + ph * 7.0);
+      float size = (0.55 + aRnd.y * aRnd.y * 2.4) * (1.0 + uHigh * 0.9 * tw + uBeat * 0.5);
+      gl_PointSize = clamp(size * uSizeScale * uPR * 26.0 / -mv.z, 1.0, 64.0);
+
+      float heat = smoothstep(0.0, 1.0, uEnergy);
+      vec3 calm = mix(uCalmA, uCalmB, aRnd.x);
+      vec3 hot  = mix(uHotA, uHotB, aRnd.z);
+      vCol = mix(calm, hot, clamp(heat + (aRnd.y - 0.5) * 0.3, 0.0, 1.0));
+      vCol = mix(vCol, uCore, step(0.93, aRnd.y) * 0.6);
+      float nearFade = smoothstep(0.4, 1.6, -mv.z);
+      vAlpha = (0.35 + 0.65 * tw) * (0.5 + 0.3 * uEnergy + b * 0.3) * nearFade;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec3 vCol;
+    varying float vAlpha;
+    void main(){
+      vec2 c = gl_PointCoord - 0.5;
+      float d = length(c);
+      float a = smoothstep(0.5, 0.0, d);
+      a *= a;
+      if (a < 0.01) discard;
+      gl_FragColor = vec4(vCol * a * vAlpha * 0.9, 1.0);
+    }
+  `,
+});
+const particles = new THREE.Points(pGeo, pMat);
+particles.frustumCulled = false;
+scene.add(particles);
+function applyParticleCount() {
+  pGeo.setDrawRange(0, Math.max(0, Math.min(MAX_PARTICLES, settings.particles | 0)));
+}
+applyParticleCount();
+
+/* Faint backdrop nebula (inside a big sphere) */
+const bgMat = new THREE.ShaderMaterial({
+  uniforms: audioUniforms,
+  side: THREE.BackSide,
+  depthWrite: false,
+  vertexShader: /* glsl */`
+    varying vec3 vDir;
+    void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    uniform float uTime, uEnergy, uVol;
+    uniform vec3 uCalmA, uCalmB, uHotA, uHotB;
+    varying vec3 vDir;
+    ${NOISE_GLSL}
+    void main(){
+      float n = snoise(vDir * 1.4 + vec3(uTime * 0.02, 0.0, uTime * 0.015)) * 0.5 + 0.5;
+      float n2 = snoise(vDir * 3.1 - vec3(0.0, uTime * 0.03, 0.0)) * 0.5 + 0.5;
+      vec3 calm = mix(uCalmA, uCalmB, n2);
+      vec3 hot = mix(uHotA, uHotB, n2);
+      vec3 col = mix(calm, hot, uEnergy * 0.8) * pow(n, 2.5) * (0.035 + uVol * 0.03);
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+const backdrop = new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), bgMat);
+backdrop.renderOrder = -2;
+scene.add(backdrop);
+
+/* =====================================================================
+   Post-processing: bloom
+   ===================================================================== */
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(pixelRatio);
+composer.setSize(innerWidth, innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.9, 0.6, 0.22);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(pixelRatio);
+  renderer.setSize(w, h, false);
+  composer.setPixelRatio(pixelRatio);
+  composer.setSize(w, h);
+  pUniforms.uPR.value = pixelRatio;
+}
+addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 250));
+
+/* =====================================================================
+   Audio: microphone analysis (local only, nothing stored or sent)
+   ===================================================================== */
+const audio = {
+  ctx: null, analyser: null, stream: null, source: null,
+  freq: null, wave: null, running: false,
+  ranges: null,
+};
+function makeBand(minRange) {
+  return { raw: 0, peak: 0.2, floor: 0.1, norm: 0, smooth: 0, minRange,
+           mean: 0, varr: 0.0004, primed: false };
+}
+const bands = { bass: makeBand(0.1), mid: makeBand(0.09), high: makeBand(0.08), vol: makeBand(0.1) };
+const out = { bass: 0, mid: 0, high: 0, vol: 0, energy: 0, beat: 0, burst: 0, burstTarget: 0, loud: 0 };
+let lastBeatAt = -10;
+
+function hzToBin(hz) {
+  return Math.round(hz / (audio.ctx.sampleRate / audio.analyser.fftSize));
+}
+function bandAverage(lo, hi) {
+  let s = 0;
+  const f = audio.freq;
+  const a = Math.max(1, lo), b = Math.min(f.length - 1, hi);
+  for (let i = a; i <= b; i++) s += f[i];
+  return s / Math.max(1, (b - a + 1)) / 255;
+}
+
+const ease = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
+
+// Auto-gain: track a slowly falling peak and a slowly rising floor per band,
+// then normalise between them. Quiet rooms get boosted, loud rooms get tamed.
+function agc(band, raw, dt, sens) {
+  band.raw = raw;
+  if (!band.primed) { band.peak = raw + band.minRange; band.floor = Math.max(0, raw - 0.02); band.mean = raw; band.primed = true; }
+  band.peak = raw > band.peak ? ease(band.peak, raw, 30, dt) : ease(band.peak, raw, 0.28, dt);
+  band.floor = raw < band.floor ? ease(band.floor, raw, 3, dt) : ease(band.floor, raw, 0.12, dt);
+  const range = Math.max(band.peak - band.floor, band.minRange / sens);
+  const n = (raw - band.floor) / range;
+  band.norm = Math.min(1, Math.max(0, n * (0.75 + 0.25 * sens)));
+  // running statistics for peak/beat detection
+  const d = raw - band.mean;
+  band.mean = ease(band.mean, raw, 2.2, dt);
+  band.varr = ease(band.varr, d * d, 2.2, dt);
+  return band.norm;
+}
+
+function updateAudio(dt, t) {
+  const sens = settings.sensitivity;
+  if (!audio.running) {
+    // Idle, calm breathing so the scene looks alive behind the start screen
+    const idle = 0.12 + 0.08 * Math.sin(t * 0.7);
+    out.bass = ease(out.bass, idle, 2, dt);
+    out.mid = ease(out.mid, 0.1, 2, dt);
+    out.high = ease(out.high, 0.05 + 0.04 * Math.sin(t * 1.3), 2, dt);
+    out.vol = ease(out.vol, 0.08, 2, dt);
+    out.energy = ease(out.energy, 0.05, 1, dt);
+    out.beat *= Math.exp(-dt * 5);
+    out.burstTarget *= Math.exp(-dt * 1.6);
+    out.burst = ease(out.burst, out.burstTarget, 10, dt);
+    return;
+  }
+  audio.analyser.getByteFrequencyData(audio.freq);
+  audio.analyser.getFloatTimeDomainData(audio.wave);
+  let sum = 0;
+  for (let i = 0; i < audio.wave.length; i++) sum += audio.wave[i] * audio.wave[i];
+  const rms = Math.sqrt(sum / audio.wave.length);
+  const volRaw = Math.min(1, Math.max(0, (20 * Math.log10(rms + 1e-7) + 70) / 70));
+
+  const R = audio.ranges;
+  const bassRaw = bandAverage(R.bass[0], R.bass[1]);
+  const midRaw = bandAverage(R.mid[0], R.mid[1]);
+  const highRaw = bandAverage(R.high[0], R.high[1]);
+
+  const nb = agc(bands.bass, bassRaw, dt, sens);
+  const nm = agc(bands.mid, midRaw, dt, sens);
+  const nh = agc(bands.high, highRaw, dt, sens);
+  const nv = agc(bands.vol, volRaw, dt, sens);
+
+  // Smooth: fast attack, slower release, so motion is fluid not jittery
+  out.bass = ease(out.bass, nb, nb > out.bass ? 16 : 3.2, dt);
+  out.mid  = ease(out.mid,  nm, nm > out.mid ? 12 : 3.0, dt);
+  out.high = ease(out.high, nh, nh > out.high ? 20 : 5.0, dt);
+  out.vol  = ease(out.vol,  nv, nv > out.vol ? 10 : 2.5, dt);
+
+  // Absolute loudness (not auto-gained) so loud rooms really do turn warm
+  const loud = Math.min(1, Math.max(0, (volRaw - 0.47 + (sens - 1) * 0.07) / 0.3));
+  out.loud = ease(out.loud, loud, loud > out.loud ? 2.5 : 0.6, dt);
+  const energyTarget = Math.min(1, 0.5 * out.loud + 0.3 * out.vol + 0.2 * out.bass);
+  out.energy = ease(out.energy, energyTarget, energyTarget > out.energy ? 1.6 : 0.5, dt);
+
+  // Beat / peak detection: bass jump well above its running mean, or a loud transient
+  const now = t;
+  const bassStd = Math.sqrt(bands.bass.varr);
+  const volStd = Math.sqrt(bands.vol.varr);
+  const bassJump = bassRaw - bands.bass.mean;
+  const volJump = volRaw - bands.vol.mean;
+  const bassHit = bassJump > Math.max(1.5 * bassStd, 0.03 / sens) && nb > 0.5;
+  const volHit = volJump > Math.max(1.8 * volStd, 0.05 / sens) && nv > 0.6;
+  if ((bassHit || volHit) && now - lastBeatAt > 0.26) {
+    lastBeatAt = now;
+    const strength = Math.min(1, Math.max(0.35, Math.max(bassJump / 0.12, volJump / 0.15)));
+    out.beat = Math.max(out.beat, strength);
+    out.burstTarget = Math.min(1.6, out.burstTarget + strength * 0.75);
+  }
+  out.beat *= Math.exp(-dt * 4.5);
+  out.burstTarget *= Math.exp(-dt * 1.5);
+  out.burst = ease(out.burst, out.burstTarget, out.burstTarget > out.burst ? 9 : 2.2, dt);
+}
+
+async function startAudio() {
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showMessage(`
+      <h2>Microphone unavailable here</h2>
+      <p>Browsers only allow microphone access on secure (https) pages. Open this piece from its https link, in Safari or Chrome.</p>
+      <button class="pill" type="button" onclick="location.reload()">Reload</button>`);
+    return false;
+  }
+  // Create and resume the AudioContext inside the tap (required on iPhone)
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!audio.ctx) audio.ctx = new AC({ latencyHint: 'interactive' });
+  const resumeP = audio.ctx.resume().catch(() => {});
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      video: false,
+    });
+  } catch (err) {
+    handleMicError(err);
+    return false;
+  }
+  await resumeP;
+  if (audio.ctx.state !== 'running') { try { await audio.ctx.resume(); } catch (_) {} }
+
+  const src = audio.ctx.createMediaStreamSource(stream);
+  const analyser = audio.ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.55;
+  analyser.minDecibels = -95;
+  analyser.maxDecibels = -15;
+  src.connect(analyser);
+  // A silent connection to the output keeps Safari's audio graph processing.
+  // Gain is 0, so nothing is ever played back (no feedback).
+  const mute = audio.ctx.createGain();
+  mute.gain.value = 0;
+  analyser.connect(mute);
+  mute.connect(audio.ctx.destination);
+
+  audio.stream = stream;
+  audio.source = src;
+  audio.analyser = analyser;
+  audio.freq = new Uint8Array(analyser.frequencyBinCount);
+  audio.wave = new Float32Array(analyser.fftSize);
+  audio.ranges = {
+    bass: [hzToBin(25), hzToBin(250)],
+    mid: [hzToBin(250), hzToBin(2000)],
+    high: [hzToBin(2000), hzToBin(11000)],
+  };
+  for (const b of Object.values(bands)) b.primed = false;
+  audio.running = true;
+
+  stream.getAudioTracks().forEach(tr => tr.addEventListener('ended', () => {
+    audio.running = false;
+    showMessage(`
+      <h2>The microphone stopped</h2>
+      <p>Another app or a call may have taken over the mic. Tap below to start listening again.</p>
+      <button class="pill" type="button" id="restartBtn">Start listening</button>`);
+    document.getElementById('restartBtn').addEventListener('click', restart, { once: true });
+  }));
+  return true;
+}
+
+function stopStream() {
+  if (audio.stream) audio.stream.getTracks().forEach(t => t.stop());
+  if (audio.source) { try { audio.source.disconnect(); } catch (_) {} }
+  audio.stream = audio.source = null;
+  audio.running = false;
+}
+
+async function restart() {
+  hideMessage();
+  stopStream();
+  const ok = await startAudio();
+  if (ok) enterRunning();
+}
+
+function handleMicError(err) {
+  const name = err && err.name;
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+    showMessage(`
+      <h2>The orb can't hear you yet</h2>
+      <p>Microphone access was blocked, so there's nothing to listen to. Sound stays on your phone and is never recorded, so it's safe to allow.</p>
+      <div class="steps">
+        <div><b>iPhone · Safari</b><br>Tap <b>aA</b> in the address bar → <b>Website Settings</b> → <b>Microphone</b> → <b>Allow</b>. Or go to Settings → Apps → Safari → Microphone.</div>
+        <div><b>iPhone · Chrome</b><br>Settings → Apps → Chrome → turn on <b>Microphone</b>.</div>
+        <div><b>Android · Chrome</b><br>Tap the icon left of the address → <b>Permissions</b> → <b>Microphone</b> → <b>Allow</b>.</div>
+      </div>
+      <p>Then come back and try again.</p>
+      <button class="pill" type="button" id="retryBtn">Try again</button>`);
+  } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+    showMessage(`
+      <h2>No microphone found</h2>
+      <p>This device doesn't seem to have a microphone available. Plug one in or try on your phone.</p>
+      <button class="pill" type="button" id="retryBtn">Try again</button>`);
+  } else if (name === 'NotReadableError' || name === 'AbortError') {
+    showMessage(`
+      <h2>The microphone is busy</h2>
+      <p>Another app (a call, a voice memo, a video app) may be using it. Close that app and try again.</p>
+      <button class="pill" type="button" id="retryBtn">Try again</button>`);
+  } else {
+    showMessage(`
+      <h2>Couldn't start the microphone</h2>
+      <p>Something went wrong while opening the mic${name ? ` (${name})` : ''}. Reloading the page usually fixes it.</p>
+      <button class="pill" type="button" id="retryBtn">Try again</button>`);
+  }
+  const retry = document.getElementById('retryBtn');
+  if (retry) retry.addEventListener('click', async () => {
+    hideMessage();
+    const ok = await startAudio();
+    if (ok) enterRunning();
+  }, { once: true });
+}
+
+/* =====================================================================
+   UI: overlays, HUD, settings, toast
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const startEl = $('start'), msgEl = $('message'), msgBody = $('messageBody');
+const hud = $('hud'), panel = $('panel'), gearBtn = $('gearBtn'), fsBtn = $('fsBtn');
+const toastEl = $('toast'), hintEl = $('hint');
+
+function showMessage(html) {
+  startEl.classList.add('hidden');
+  msgBody.innerHTML = html;
+  msgEl.classList.remove('hidden');
+  hud.classList.add('gone');
+  closePanel();
+}
+function hideMessage() { msgEl.classList.add('hidden'); }
+
+let toastTimer;
+function toast(text) {
+  toastEl.textContent = text;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1600);
+}
+
+let begun = false;
+$('beginBtn').addEventListener('click', async () => {
+  if (begun) return;
+  begun = true;
+  const ok = await startAudio();
+  begun = false;
+  if (ok) enterRunning();
+});
+
+function enterRunning() {
+  startEl.classList.add('hidden');
+  hideMessage();
+  hud.classList.remove('gone');
+  requestWakeLock();
+  hintEl.classList.remove('hidden');
+  setTimeout(() => hintEl.classList.add('hidden'), 4500);
+  scheduleHudDim();
+}
+
+// HUD fades to low opacity when idle, so the art takes centre stage
+let hudTimer;
+function scheduleHudDim() {
+  hud.classList.remove('dim');
+  clearTimeout(hudTimer);
+  hudTimer = setTimeout(() => { if (panel.classList.contains('closed')) hud.classList.add('dim'); }, 3500);
+}
+addEventListener('pointerdown', scheduleHudDim, { passive: true });
+
+/* Settings panel */
+const sens = $('sens'), glow = $('glow'), count = $('count');
+const sensOut = $('sensOut'), glowOut = $('glowOut'), countOut = $('countOut');
+count.max = String(MOBILE ? 8000 : MAX_PARTICLES);
+function syncSettingsUI() {
+  sens.value = settings.sensitivity; glow.value = settings.glow; count.value = settings.particles;
+  sensOut.textContent = Number(settings.sensitivity).toFixed(2) + '×';
+  glowOut.textContent = Math.round(settings.glow * 100) + '%';
+  countOut.textContent = Number(settings.particles).toLocaleString();
+  $('paletteName').textContent = PALETTES[settings.palette].name;
+}
+syncSettingsUI();
+sens.addEventListener('input', () => { settings.sensitivity = parseFloat(sens.value); syncSettingsUI(); saveSettings(); });
+glow.addEventListener('input', () => { settings.glow = parseFloat(glow.value); syncSettingsUI(); saveSettings(); });
+count.addEventListener('input', () => { settings.particles = parseInt(count.value, 10); applyParticleCount(); syncSettingsUI(); saveSettings(); });
+$('resetBtn').addEventListener('click', () => {
+  const pal = settings.palette;
+  Object.assign(settings, DEFAULTS, { palette: pal });
+  applyParticleCount(); syncSettingsUI(); saveSettings();
+});
+$('paletteBtn').addEventListener('click', () => cyclePalette());
+
+function openPanel() { panel.classList.remove('closed'); gearBtn.setAttribute('aria-expanded', 'true'); hud.classList.remove('dim'); }
+function closePanel() { panel.classList.add('closed'); gearBtn.setAttribute('aria-expanded', 'false'); }
+gearBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  panel.classList.contains('closed') ? openPanel() : closePanel();
+});
+canvas.addEventListener('pointerdown', () => closePanel());
+
+/* Palette cycling */
+function cyclePalette() {
+  settings.palette = (settings.palette + 1) % PALETTES.length;
+  setPaletteTarget(settings.palette, false);
+  saveSettings();
+  syncSettingsUI();
+  toast(PALETTES[settings.palette].name);
+}
+
+/* Double-tap detection on the canvas (works for touch and mouse) */
+{
+  let downAt = 0, downX = 0, downY = 0, lastTapAt = 0, lastX = 0, lastY = 0, multi = false, activePointers = 0;
+  canvas.addEventListener('pointerdown', e => {
+    activePointers++;
+    if (activePointers > 1) multi = true;
+    if (activePointers === 1) { multi = false; downAt = performance.now(); downX = e.clientX; downY = e.clientY; }
+  });
+  const up = e => {
+    activePointers = Math.max(0, activePointers - 1);
+    if (activePointers > 0 || multi) return;
+    const now = performance.now();
+    const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
+    if (now - downAt > 280 || moved > 14) { lastTapAt = 0; return; }
+    if (now - lastTapAt < 340 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 50) {
+      lastTapAt = 0;
+      cyclePalette();
+    } else {
+      lastTapAt = now; lastX = e.clientX; lastY = e.clientY;
+    }
+  };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', () => { activePointers = Math.max(0, activePointers - 1); lastTapAt = 0; });
+  // stop iOS from treating double-tap / pinch as page zoom
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('dblclick', e => e.preventDefault());
+}
+
+/* Fullscreen */
+const fsEl = document.documentElement;
+const canFS = !!(fsEl.requestFullscreen || fsEl.webkitRequestFullscreen) && (document.fullscreenEnabled || document.webkitFullscreenEnabled);
+if (canFS) {
+  fsBtn.hidden = false;
+} else {
+  $('tip').textContent = 'Drag to rotate · pinch to zoom · double-tap to change colours. For fullscreen on iPhone: Share → Add to Home Screen.';
+}
+fsBtn.addEventListener('click', async () => {
+  const isFS = document.fullscreenElement || document.webkitFullscreenElement;
+  try {
+    if (!isFS) {
+      if (fsEl.requestFullscreen) await fsEl.requestFullscreen({ navigationUI: 'hide' });
+      else fsEl.webkitRequestFullscreen();
+    } else {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else document.webkitExitFullscreen();
+    }
+  } catch (_) { toast('Fullscreen not available'); }
+});
+
+/* Keep the screen awake while running */
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator && document.visibilityState === 'visible' && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch (_) { wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && audio.running) {
+    requestWakeLock();
+    if (audio.ctx && audio.ctx.state !== 'running') audio.ctx.resume().catch(() => {});
+  }
+});
+// iOS can "interrupt" the audio context (e.g. after a notification); any tap resumes it
+addEventListener('pointerdown', () => {
+  if (audio.ctx && audio.running && audio.ctx.state !== 'running') audio.ctx.resume().catch(() => {});
+}, { passive: true });
+
+/* =====================================================================
+   Animation loop
+   ===================================================================== */
+let last = performance.now();
+let t = 0;
+let fpsAcc = 0, fpsFrames = 0, fpsCheckAt = 0;
+
+function frame(nowMs) {
+  const dt = Math.min(0.05, Math.max(0.001, (nowMs - last) / 1000));
+  last = nowMs;
+  t += dt;
+
+  updateAudio(dt, t);
+
+  // Palette crossfade
+  const k = 1 - Math.exp(-dt * 2.5);
+  for (const key of Object.keys(colorState)) colorState[key].lerp(colorTarget[key], k);
+
+  // Uniforms
+  audioUniforms.uTime.value = t;
+  audioUniforms.uBass.value = out.bass;
+  audioUniforms.uMid.value = out.mid;
+  audioUniforms.uHigh.value = out.high;
+  audioUniforms.uVol.value = out.vol;
+  audioUniforms.uBeat.value = out.beat;
+  audioUniforms.uEnergy.value = out.energy;
+  pUniforms.uBurst.value = out.burst;
+
+  // Orb & halo motion
+  orb.rotation.y += dt * (0.08 + out.mid * 0.35);
+  orb.rotation.x = Math.sin(t * 0.13) * 0.25;
+  haloMat.color.copy(colorState.calmB).lerp(colorState.hotA, out.energy);
+  haloMat.opacity = 0.14 + out.vol * 0.12 + out.beat * 0.14;
+  halo.scale.setScalar(4.4 + out.bass * 1.0 + out.beat * 0.8);
+  particles.rotation.y -= dt * 0.015;
+
+  // Bloom responds to glow setting and to hits
+  bloom.strength = settings.glow * (0.75 + out.vol * 0.2 + out.beat * 0.3);
+  bloom.radius = 0.5 + out.energy * 0.2;
+  renderer.toneMappingExposure = 0.9 + out.beat * 0.12 + out.energy * 0.05;
+
+  controls.autoRotateSpeed = 0.3 + out.energy * 0.9;
+  controls.update();
+  composer.render(dt);
+
+  // Settings meters (only when visible)
+  if (!panel.classList.contains('closed')) {
+    $('mBass').style.width = (out.bass * 100).toFixed(0) + '%';
+    $('mMid').style.width = (out.mid * 100).toFixed(0) + '%';
+    $('mHigh').style.width = (out.high * 100).toFixed(0) + '%';
+    $('mVol').style.width = (out.vol * 100).toFixed(0) + '%';
+  }
+
+  // Adaptive resolution: step pixel ratio down if the phone is struggling
+  fpsAcc += dt; fpsFrames++;
+  if (t - fpsCheckAt > 2.5) {
+    const fps = fpsFrames / fpsAcc;
+    if (fps < 46 && pixelRatio > 0.75) { pixelRatio = Math.max(0.75, pixelRatio - 0.25); resize(); }
+    fpsAcc = 0; fpsFrames = 0; fpsCheckAt = t;
+  }
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
